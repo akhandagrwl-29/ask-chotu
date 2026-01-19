@@ -3,6 +3,10 @@ name: Ask Chotu
 on:
   workflow_dispatch:
 
+concurrency:
+  group: Ask Chotu
+  cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
