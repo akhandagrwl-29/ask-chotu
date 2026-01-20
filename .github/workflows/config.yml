@@ -22,4 +22,4 @@ jobs:
           NTFY_TOPICS: ${{ secrets.NTFY_TOPICS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GISTS: ${{ secrets.GISTS }}
-        run: go run main.go
+        run: go run .
