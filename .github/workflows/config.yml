@@ -17,6 +17,12 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Initialize Go module
+        run: go mod init ask-chotu
+        
+      - name: Download dependencies
+        run: go mod tidy
+        
       - name: Run server
         env:
           NTFY_TOPICS: ${{ secrets.NTFY_TOPICS }}
