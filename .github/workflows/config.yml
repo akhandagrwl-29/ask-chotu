@@ -26,6 +26,6 @@ jobs:
       - name: Run server
         env:
           NTFY_TOPICS: ${{ secrets.NTFY_TOPICS }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.MODEL_TOKEN }}
           GISTS: ${{ secrets.GISTS }}
         run: go run .
