@@ -19,16 +19,22 @@ type NtfyEvent struct {
 	Message string `json:"message"`
 }
 
-func listenTopic(topic string) {
+var (
+	contextMap = make(map[string]string)
+	historyMap = make(map[string]*ChatHistory)
+)
+
+func listenTopic(topic string, context string, history *ChatHistory) {
 	url := fmt.Sprintf("https://ntfy.sh/%s/json", topic)
+	count := 0
 
 	for {
-		log.Printf("Listening on topic: %s\n", topic)
+		log.Printf("Listening on topic: %s\n", getTrimmedText(topic))
 
 		resp, err := http.Get(url)
 		if err != nil {
-			log.Printf("[%s] connection error: %v", topic, err)
-			time.Sleep(5 * time.Second)
+			log.Printf("[%s] connection error: %v", getTrimmedText(topic), err)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 
@@ -39,27 +45,48 @@ func listenTopic(topic string) {
 
 			var event NtfyEvent
 			if err := json.Unmarshal(line, &event); err != nil {
-				log.Printf("[%s] invalid json: %v", topic, err)
+				log.Printf("[%s] invalid json: %v", getTrimmedText(topic), err)
 				continue
 			}
 
-			log.Printf("[%s] event=%+v\n", topic, event)
+			log.Printf("[%s] event=%+v\n", getTrimmedText(topic), event)
 
-			if event.Event == "message" && !strings.Contains(event.Message, "Chotu") {
-				log.Printf("[%s] New message: %s\n", topic, event.Message)
+			if event.Event == "message" && !strings.Contains(event.Message, "Chotu:") {
+				count++
+				log.Printf("[%s] New message: %s\n", getTrimmedText(topic), event.Message)
 
-				http.Post(
-					fmt.Sprintf("https://ntfy.sh/%s", topic),
-					"text/plain",
-					strings.NewReader(
-						fmt.Sprintf("Ask Chotu: %s", event.Message),
-					),
-				)
+				if count >= 10 {
+					msg := l2
+					if count == 10 {
+						msg = l1
+					}
+					time.Sleep(1 * time.Second)
+					_ = publishResponse(topic, msg)
+					if err != nil {
+						log.Printf("[%s] error publishing response: %v", getTrimmedText(topic), err)
+						continue
+					}
+					continue
+				}
+
+				chatbotResponse, err := getChatbotResponse(event.Message, context, history)
+				if err != nil {
+					log.Printf("[%s] error getting chatbotResponse response: %v", getTrimmedText(topic), err)
+					continue
+				}
+
+				log.Printf("[%s] Chatbot response: %s\n", getTrimmedText(topic), chatbotResponse)
+
+				err = publishResponse(topic, chatbotResponse)
+				if err != nil {
+					log.Printf("[%s] error publishing response: %v", getTrimmedText(topic), err)
+					continue
+				}
 			}
 		}
 
 		if err := scanner.Err(); err != nil {
-			log.Printf("[%s] scanner error: %v", topic, err)
+			log.Printf("[%s] scanner error: %v", getTrimmedText(topic), err)
 		}
 
 		resp.Body.Close()
@@ -74,13 +101,31 @@ func main() {
 	if topicsEnv == "" {
 		log.Fatal("NTFY_TOPICS env variable not set")
 	}
-
 	topics := strings.Split(topicsEnv, ",")
 
-	for _, topic := range topics {
-		go listenTopic(strings.TrimSpace(topic))
+	gistsEnv := os.Getenv("GISTS")
+	if gistsEnv == "" {
+		log.Fatal("GISTS env variable not set")
+	}
+	gists := strings.Split(gistsEnv, ",")
+
+	for i, gist := range gists {
+		topic := topics[i]
+		context := getContextText(topic, gist)
+		contextMap[topic] = context
+		log.Printf("Loaded context for topic %s from gist %s\n", getTrimmedText(topic), getTrimmedText(gist))
+	}
+
+	for _, x := range topics {
+		topic := x
+		context := contextMap[topic]
+		history := historyMap[topic]
+		if history == nil {
+			history = &ChatHistory{}
+			historyMap[topic] = history
+		}
+		go listenTopic(strings.TrimSpace(topic), context, history)
 	}
 
 	select {}
 }
-
