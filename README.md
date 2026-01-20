@@ -1,6 +1,8 @@
 # Ask Chotu
 
 **Ask Chotu** is a simple chatbot project that allows you to ask questions about yourself or any other topic. It leverages open-source large language models (LLMs) to generate conversational responses.
+<img width="404" height="316" alt="image" src="https://github.com/user-attachments/assets/ad317e8d-39b1-41df-b7d5-8dc8248ffbd5" />
+
 
 ## Features
 
