@@ -55,9 +55,9 @@ func listenTopic(topic string, context string, history *ChatHistory) {
 				count++
 				log.Printf("[%s] New message: %s\n", getTrimmedText(topic), event.Message)
 
-				if count >= 10 {
+				if count >= 20 {
 					msg := l2
-					if count == 10 {
+					if count == 20 {
 						msg = l1
 					}
 					time.Sleep(1 * time.Second)
