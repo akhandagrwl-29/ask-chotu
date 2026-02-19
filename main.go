@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,121 +10,147 @@ import (
 	"time"
 )
 
-type NtfyEvent struct {
-	ID      string `json:"id"`
-	Time    int64  `json:"time"`
-	Event   string `json:"event"`
-	Topic   string `json:"topic"`
-	Message string `json:"message"`
+// Telegram API types for getUpdates
+type TelegramUpdate struct {
+	UpdateID int              `json:"update_id"`
+	Message  *TelegramMessage `json:"message,omitempty"`
+}
+
+type TelegramMessage struct {
+	MessageID int           `json:"message_id"`
+	From      *TelegramUser `json:"from,omitempty"`
+	Chat      TelegramChat  `json:"chat"`
+	Date      int64         `json:"date"`
+	Text      string        `json:"text,omitempty"`
+}
+
+type TelegramUser struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
+}
+
+type TelegramChat struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+}
+
+type getUpdatesResponse struct {
+	OK     bool             `json:"ok"`
+	Result []TelegramUpdate `json:"result"`
 }
 
 var (
-	contextMap = make(map[string]string)
-	historyMap = make(map[string]*ChatHistory)
+	contextMap           = make(map[string]string)
+	historyMap           = make(map[int64]*ChatHistory)
+	messageCountMap      = make(map[int64]int)
+	updateIDProcessedMap = make(map[int]bool)
 )
 
-func listenTopic(topic string, context string, history *ChatHistory) {
-	url := fmt.Sprintf("https://ntfy.sh/%s/json", topic)
-	count := 0
+func listenTelegramUpdates(botToken string, context string) {
+	baseURL := fmt.Sprintf("https://api.telegram.org/bot%s", botToken)
+	offset := 0
 
 	for {
-		log.Printf("Listening on topic: %s\n", getTrimmedText(topic))
-
+		url := fmt.Sprintf("%s/getUpdates?offset=%d&timeout=60", baseURL, offset)
 		resp, err := http.Get(url)
 		if err != nil {
-			log.Printf("[%s] connection error: %v", getTrimmedText(topic), err)
+			log.Printf("Telegram getUpdates connection error: %v", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		scanner := bufio.NewScanner(resp.Body)
+		var updates getUpdatesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&updates); err != nil {
+			log.Printf("Telegram getUpdates decode error: %v", err)
+			resp.Body.Close()
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		resp.Body.Close()
 
-		for scanner.Scan() {
-			line := scanner.Bytes()
+		if !updates.OK {
+			log.Printf("Telegram getUpdates returned ok=false")
+			time.Sleep(2 * time.Second)
+			continue
+		}
 
-			var event NtfyEvent
-			if err := json.Unmarshal(line, &event); err != nil {
-				log.Printf("[%s] invalid json: %v", getTrimmedText(topic), err)
+		if n := len(updates.Result); n > 0 {
+			u := updates.Result[n-1]
+			updateProcessed := updateIDProcessedMap[u.UpdateID]
+			if updateProcessed {
+				log.Printf("Telegram update %d already processed, skipping", u.UpdateID)
 				continue
 			}
+			offset = u.UpdateID + 1
+			if u.Message != nil && u.Message.Text != "" {
+				chatID := u.Message.Chat.ID
+				text := strings.TrimSpace(u.Message.Text)
+				log.Printf("[chat %d] New message: %s", chatID, text)
 
-			log.Printf("[%s] event=%+v\n", getTrimmedText(topic), event)
+				history := historyMap[chatID]
+				if history == nil {
+					history = &ChatHistory{}
+					historyMap[chatID] = history
+				}
 
-			if event.Event == "message" && !strings.Contains(event.Message, "Chotu:") {
+				count := messageCountMap[chatID]
 				count++
-				log.Printf("[%s] New message: %s\n", getTrimmedText(topic), event.Message)
+				messageCountMap[chatID] = count
 
-				if count >= 20 {
+				if count >= 140 {
 					msg := l2
-					if count == 20 {
+					if count == 140 {
 						msg = l1
 					}
 					time.Sleep(1 * time.Second)
-					_ = publishResponse(topic, msg)
-					if err != nil {
-						log.Printf("[%s] error publishing response: %v", getTrimmedText(topic), err)
-						continue
+					if err := sendTelegramMessage(botToken, chatID, msg); err != nil {
+						log.Printf("[chat %d] error sending response: %v", chatID, err)
 					}
-					continue
+				} else {
+					chatbotResponse, err := getChatbotResponse(text, context, history)
+					if err != nil {
+						log.Printf("[chat %d] error getting chatbot response: %v", chatID, err)
+					} else {
+						log.Printf("[chat %d] Chatbot response: %s", chatID, chatbotResponse)
+						if err := sendTelegramMessage(botToken, chatID, chatbotResponse); err != nil {
+							log.Printf("[chat %d] error sending response: %v", chatID, err)
+						}
+					}
 				}
 
-				chatbotResponse, err := getChatbotResponse(event.Message, context, history)
-				if err != nil {
-					log.Printf("[%s] error getting chatbotResponse response: %v", getTrimmedText(topic), err)
-					continue
-				}
-
-				log.Printf("[%s] Chatbot response: %s\n", getTrimmedText(topic), chatbotResponse)
-
-				err = publishResponse(topic, chatbotResponse)
-				if err != nil {
-					log.Printf("[%s] error publishing response: %v", getTrimmedText(topic), err)
-					continue
-				}
 			}
+			updateIDProcessedMap[u.UpdateID] = true
 		}
 
-		if err := scanner.Err(); err != nil {
-			log.Printf("[%s] scanner error: %v", getTrimmedText(topic), err)
+		// brief pause when no updates to avoid hammering API
+		if len(updates.Result) == 0 {
+			time.Sleep(500 * time.Millisecond)
 		}
-
-		resp.Body.Close()
-
-		// reconnect if stream closes
-		time.Sleep(2 * time.Second)
 	}
 }
 
 func main() {
-	topicsEnv := os.Getenv("NTFY_TOPICS")
-	if topicsEnv == "" {
-		log.Fatal("NTFY_TOPICS env variable not set")
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if botToken == "" {
+		botToken = os.Getenv("BOT_TOKEN")
 	}
-	topics := strings.Split(topicsEnv, ",")
+	if botToken == "" {
+		log.Fatal("TELEGRAM_BOT_TOKEN or BOT_TOKEN env variable not set")
+	}
 
 	gistsEnv := os.Getenv("GISTS")
 	if gistsEnv == "" {
 		log.Fatal("GISTS env variable not set")
 	}
 	gists := strings.Split(gistsEnv, ",")
+	// Use first gist for context (single context for the bot)
+	gistID := strings.TrimSpace(gists[0])
+	context := getContextText("telegram", gistID)
+	log.Printf("Loaded context from gist %s", getTrimmedText(gistID))
 
-	for i, gist := range gists {
-		topic := topics[i]
-		context := getContextText(topic, gist)
-		contextMap[topic] = context
-		log.Printf("Loaded context for topic %s from gist %s\n", getTrimmedText(topic), getTrimmedText(gist))
-	}
+	go listenTelegramUpdates(botToken, context)
 
-	for _, x := range topics {
-		topic := x
-		context := contextMap[topic]
-		history := historyMap[topic]
-		if history == nil {
-			history = &ChatHistory{}
-			historyMap[topic] = history
-		}
-		go listenTopic(strings.TrimSpace(topic), context, history)
-	}
-
+	log.Println("Telegram bot started. Listening for messages...")
 	select {}
 }
