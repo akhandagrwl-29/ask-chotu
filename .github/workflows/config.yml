@@ -2,8 +2,8 @@ name: Ask Chotu
 
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: "0 */2 * * *"
+  schedule:
+    - cron: "0 */4 * * *"
 
 concurrency:
   group: Ask Chotu
