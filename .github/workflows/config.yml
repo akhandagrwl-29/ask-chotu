@@ -30,4 +30,5 @@ jobs:
           NTFY_TOPICS: ${{ secrets.NTFY_TOPICS }}
           GITHUB_TOKEN: ${{ secrets.MODEL_TOKEN }}
           GISTS: ${{ secrets.GISTS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: go run .
