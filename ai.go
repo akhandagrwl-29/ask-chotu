@@ -73,10 +73,7 @@ type MCPToolCallParams struct {
 
 // CallShopifyMCP calls the Shopify MCP server to get relevant information
 func callShopifyMCP(query string) (string, error) {
-	mcpURL := os.Getenv("SHOPIFY_MCP_URL")
-	if mcpURL == "" {
-		mcpURL = "https://chatbot-ai-app.myshopify.com/api/mcp"
-	}
+	mcpURL := "https://your-custom-mcp-url.com/api/mcp"
 
 	// First, list available tools
 	listToolsReq := MCPRequest{
@@ -98,6 +95,8 @@ func callShopifyMCP(query string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 
+
+	
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error calling MCP server: %v", err)
@@ -240,6 +239,7 @@ func callShopifyMCP(query string) (string, error) {
 		}
 	}
 
+	fmt.Println(resultContent)
 	return resultContent, nil
 }
 
